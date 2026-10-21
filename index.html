@@ -463,6 +463,7 @@ let ready;
   let publicSelectedAlbumId = null;
   let publicArtists = [];
   let publicLibraryIds = []; 
+  let driveArtistNames = {};   // drive song id -> artist, remembered so names survive a reload
   let publicCatalogLoaded = false;
 
   
@@ -594,7 +595,8 @@ let ready;
 
   function makeDriveSong(file, probeDuration = true, artistName = '') {
     const id = 'drive:' + file.id;
-    artistName = artistName || publicArtistForFile(file.id); 
+    artistName = artistName || publicArtistForFile(file.id) || driveArtistNames[id] || '';
+    if (artistName) driveArtistNames[id] = artistName;
     const urls = driveAudioUrls(file);
     const found = byId(id);
     if (found) {
@@ -769,6 +771,7 @@ let ready;
       publicArtists = artists;
       publicAlbums = artists.flatMap((artist) => artist.albums);
       publicCatalogLoaded = true;
+      saveState();   // learn artist names for songs saved before names were remembered
     } catch (error) {
       if (token !== publicRequestToken) return;
       publicError = error && error.message ? error.message : 'Could not load the Google Drive music catalog.';
@@ -1031,11 +1034,21 @@ function dbRun(mode, fn) {
 const dbSave = (rec) => dbRun('readwrite', (st) => st.put(rec)).catch(warnSave);
 const dbRemove = (id) => dbRun('readwrite', (st) => st.delete(id)).catch(() => {});
 
+// only remember artists for songs that are actually in the library or a playlist
+function keptArtistNames() {
+  const keep = new Set(publicLibraryIds);
+  playlists.forEach((p) => (p.ids || []).forEach((id) => keep.add(id)));
+  const out = {};
+  keep.forEach((id) => { if (driveArtistNames[id]) out[id] = driveArtistNames[id]; });
+  return out;
+}
+
 function saveState() {
   if (!loaded) return;                  
   try {
     localStorage.setItem(STORE_KEY, JSON.stringify({
       playlists, nextId, shuffle, volume: Math.round(audio.volume * 100), publicLibraryIds,
+      driveArtists: keptArtistNames(),
     }));
   } catch (e) { warnSave(); }
 }
@@ -1045,6 +1058,7 @@ async function loadSaved() {
   try { state = JSON.parse(localStorage.getItem(STORE_KEY)) || {}; } catch (e) {  }
   playlists = Array.isArray(state.playlists) ? state.playlists : [];
   publicLibraryIds = Array.isArray(state.publicLibraryIds) ? [...new Set(state.publicLibraryIds.filter(isDriveSongId))] : [];
+  driveArtistNames = state.driveArtists && typeof state.driveArtists === 'object' ? state.driveArtists : {};
   nextId = state.nextId || 1;
   if (typeof state.volume === 'number') {
     $('volume').value = state.volume;
